@@ -1,0 +1,1 @@
+$env = [System.Environment]::GetEnvironmentVariables()
