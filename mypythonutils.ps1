@@ -1,13 +1,18 @@
 param(
+	[Parameter(Position=0)]
 	[string]$Function,
+	
+	[Parameter(Position=1)]
 	[string]$Version,
+	
+	[Parameter(Position=2)]
 	[string]$Name
 )
 # Questo script funziona solo per versioni powershell naggiori di 7.0
 # Verifica se la versione di PowerShell è maggiore o uguale a 7
 $_PSVersion=$PSVersionTable.PSVersion
-if ($_PSVersion -ge [Version]"7.0") {
-    Write-Debug "PowerShell version is major o equal 7 ($_PSVersion)."
+if ($_PSVersion.Major -ge 7) {
+    Write-Debug "PowerShell version is 7 or above ($_PSVersion)."
 } else {
     Write-Host "PowerShell version is below 7.0 ($_PSVersion): I can't go on!"
 	exit -10
@@ -24,7 +29,7 @@ function fixPath{
 	foreach ($p in $paths) {
 		if ($p -ne '') { # Ignora voci vuote
 			$expandedPath = [Environment]::ExpandEnvironmentVariables($p)
-			Write-Output $expandedPath
+			#Write-Host $expandedPath
 			if($path -ne '') {
 				$path=$path+";"
 			}
@@ -34,36 +39,64 @@ function fixPath{
 	$env:PATH=$path
 }
 
+function getCurrentPythonVersion{
+	$pythonVersion = python --version 2>&1
+	Write-Host "Current python version is ${pythonVersion}"
+	return $pythonVersion
+}
+
 function setPythonVersion{
 	param (
-		[Parameter(Mandatory=$true)]
+		[Parameter(Mandatory=$true,Position=0)]
 		[string]$Version
 	)
-
-	# Mappa le versioni ai percorsi delle variabili di ambiente
-	$pythonEnvPaths = @{
-		"3.7" = $env:PYTHON_3_7_HOME
-		"3.10" = $env:PYTHON_3_10_HOME
-		"3.11" = $env:PYTHON_3_11_HOME
-		"3.13" = $env:PYTHON_3_13_HOME
+	$cv=getCurrentPythonVersion
+	if ($Version -eq $cv){
+		Write-Host "$Version is already the current one"
+		return 0
 	}
+	# Mappa le versioni ai percorsi delle variabili di ambiente
+	#$pythonEnvPaths = @{
+	#	"3.7" = $env:PYTHON_HOME_3_7
+	#	"3.10" = $env:PYTHON_HOME_3_10
+	#	"3.11" = $env:PYTHON_HOME_3_11
+	#	"3.13" = $env:PYTHON_HOME_3_13
+	#}
+	$versions = Get-ChildItem Env: |
+    Where-Object { $_.Name -like 'PYTHON_HOME*' } |
+    ForEach-Object {
+        $_.Name.Substring(11).TrimStart('_').Replace("_",".")
+    } | Where-Object { $_ -ne '' }
+	#$versions = @("3.7", "3.10", "3.11", "3.13")
+	$pythonEnvPaths = @{}
+	foreach ($v in $versions) {
+		#Write-Host $v
+		$varName = "PYTHON_HOME_" + $v.Replace(".", "_")#+"%"
+		#Write-Host $varName
+		# Accesso dinamico corretto alla variabile di ambiente
+		$value = [Environment]::ExpandEnvironmentVariables($varName)#$env:${varName}  # oppure: $value = $env[$varName]
 
+		if ($value) {
+			$pythonEnvPaths[$v] = $value
+		}
+	}
 	# Controlla se la versione fornita è supportata
-	if ($pythonPaths.ContainsKey($Version)) {
+	if ($pythonEnvPaths.ContainsKey($Version)) {
 		# Imposta PYTHON_HOME alla variabile corrispondente
-		$env:PYTHON_HOME = $pythonPaths[$Version]
+		$env:PYTHON_HOME = [System.Environment]::GetEnvironmentVariable($pythonEnvPaths[$Version],"User")
+		
 		# Salva il valore ESPANSO per la prossima sessione
-		[System.Environment]::SetEnvironmentVariable("PYTHON_HOME", [Environment]::ExpandEnvironmentVariables($pythonPaths[$Version]), [System.EnvironmentVariableTarget]::User)
+		[System.Environment]::SetEnvironmentVariable("PYTHON_HOME", [Environment]::ExpandEnvironmentVariables($pythonEnvPaths[$Version]), [System.EnvironmentVariableTarget]::User)
 		
 		$env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
 		# Vado a rendere espanse e quindi subito disponibili le folder definite in PATH
 		fixPath
-		Write-Output "PYTHON_HOME setted to: $env:PYTHON_HOME"
+		Write-Host "PYTHON_HOME setted to: $env:PYTHON_HOME"
 	} else {
-		Write-Output "Error: Version $Version usupported."
+		Write-Host "Error: Version $Version usupported."
 		# Mostra le versioni disponibili
-		Write-Output "Avaliable versions:"
-		$pythonPaths.Keys | ForEach-Object { Write-Output " - $_" }
+		Write-Host "Avaliable versions:"
+		$pythonEnvPaths.Keys | ForEach-Object { Write-Host " - $_" }
 		return -1
 	}
 	return 0
@@ -75,7 +108,7 @@ function choosePythonVenv{
 	# Verifica se ci sono cartelle disponibili
 	if ($folders.Count -eq 0) {
 		Write-Host "No '.venv' folder found!"
-		exit -2
+		return 0
 	}
 
 	# Mostra la lista delle cartelle con un indice
@@ -114,41 +147,45 @@ function choosePythonVenv{
 }
 
 function createPythonVenv{
-	Write-Host "Version=$Version, Name=$Name"
-	$venvFolderName = ".venv_$Version_$Name"
-	Write-Host "venvFolderName=$venvFolderName"
-	#exit 0
-	Write-Host "Going to set python version if exists:"
-	$result = setPythonVersion
-
-	# Controlla il codice di uscita
-	if ($result -ne 0) {
-		Write-Host "Exit with value $result"
-		exit $result
+	param (
+		[Parameter(Mandatory=$false,Position=0)]
+		[string]$version,
+		
+		[Parameter(Mandatory=$false,Position=0)]
+		[string]$name
+	)
+	# Write-Host "Version: $Version, Name: $Name"
+	if(-not $Version){
+		$Version=getCurrentPythonVersion
+	}else{
+		Write-Host "Going to set python version to ${Version} if exists:"
+		$result = setPythonVersion -Version $Version
+		# Controlla il codice di uscita
+		if ($result -ne 0) {
+			Write-Host "Exit with value $result"
+			exit $result
+		}
+		Write-Host "Python version setted up!"		
 	}
-	Write-Host "Python version setted up!"
-	if($Name -eq $null){
-		$return = choosePythonVenv
-		if(($return -as [int]) -and ($return -eq 0)){
-			# Chiedi all'utente il nomde dalal venv per questa versione
-			$Name=$userinput = Read-Host "Give me the name of venv for ${Version}:(Empty kill script)"
-			if($Name -eq $null){
-				return -3
-			}else{
-				$venvFolderName = ".venv_$Version_$Name"
-			}
+	if(-not $Name){
+		# Chiedi all'utente il nome della venv per questa versione
+		$Name=$userinput = Read-Host "Give me the name of venv for ${Version}"
+		if($Name -eq ""){
+			Write-Host "U gave me null"
+			$venvFolderName = ".venv_$Version"
 		}else{
-			$venvFolderName=$return
+			Write-Host "U gave me ${Name}"
+			$venvFolderName = ".venv_${Version}_${Name}"
 		}
 	}else{
-		$venvFolderName = ".venv_$Version_$Name"
+		$venvFolderName = ".venv_${Version}_${Name}"
 	}
 
 	# Verifica se la cartella esiste
 	if (Test-Path $venvFolderName) {
 		Write-Host "The venv $venvFolderName folder exists, I use it..."
 	} else {
-		Write-Host "The venv $venvFolderName does not exist, I will create it (waiting venv is created) ..."
+		Write-Host "The venv $venvFolderName does not exist, I will create it (waiting untill venv is created) ..."
 		& python -m venv "$venvFolderName"
 		Write-Host "Created $venvFolderName!"
 	}
@@ -157,6 +194,7 @@ function createPythonVenv{
 
 function enablePythonVenv{
 	param(
+		[Parameter(Mandatory=$false,Position=0)]
 		[string]$venvFolderName
 	)
 	if($venvFolderName -eq ""){
@@ -165,10 +203,10 @@ function enablePythonVenv{
 	if($venvFolderName -eq 0){
 		$venvFolderName =  createPythonVenv
 	}
-	Write-Output "Enabling $venvFolderName!"
+	Write-Host "Enabling $venvFolderName!"
 	# Attivo la venv
 	& "$venvFolderName\Scripts\activate.ps1"
-	Write-Output "Enabled!!!"
+	Write-Host "Enabled!!!"
 }
 
 
@@ -181,15 +219,16 @@ $available_functions=@{
 $help_functions = @{
 	"setvenv" = "Enable available python venv in this folder (.venv* folders)"
 	"newvenv" = "-Version python_version -Name venv_name : to create python venv (.venv_Version_Name)"
-	"setversion" = "-Version python_version: to set python version (if installed and configured in env as PYTHON_Version_HOME) "
+	"setversion" = "-Version python_version: to set python version (if installed and configured in env as PYTHON_HOME_version) "
 }
 
 # Crea una lista (hashtable) con la parte dopo "PYTHON_HOME_" come chiave e il nome della variabile come valore
-$pythonEnvPaths = @{}
-Get-ChildItem Env: | Where-Object { $_.Name -like "PYTHON_HOME_*" } | ForEach-Object {
-    $key = $_.Name.Substring("PYTHON_HOME_".Length).Replace("_",".")   # Rimuove "PYTHON_HOME_" dalla parte iniziale
-	$pythonEnvPaths[$key] = $_.Name
-}
+#$pythonEnvPaths = @{}
+#Get-ChildItem Env: | Where-Object { $_.Name -like "PYTHON_HOME_*" } | ForEach-Object {
+#    $key = $_.Name.Substring("PYTHON_HOME_".Length).Replace("_",".")   # Rimuove "PYTHON_HOME_" dalla parte iniziale
+#	$pythonEnvPaths[$key] = $_.Name
+#}
+#Write-Host $pythonEnvPaths
 
 # Ottieni il nome del comando corrente
 $thisCommandName = $MyInvocation.MyCommand
@@ -202,7 +241,21 @@ function usageThisScript{
 	}
 }
 if(($available_functions.ContainsKey($Function))){
-	& $available_functions[$Function] $Version $Name
+	switch ($Function) {
+		"setversion" {
+			& setPythonVersion -Version $Version
+		}
+		"newvenv" {
+			& createPythonVenv -Version $Version -Name $Name
+		}
+		"setvenv" {
+			& setPythonVenv -Version $Version -Name $Name
+		}
+		default {
+			Write-Host "Unknown function: $Function"
+			usageThisScript
+		}
+	}
 }else{
 	usageThisScript
 }
