@@ -1,20 +1,24 @@
 # Script Parameters
+# --- Dichiarazione dei Parametri dello Script ---
 param(
-    [Parameter(Mandatory=$true)]
+    # Questi parametri sono obbligatori in entrambi i set di metadati
+    [Parameter(Mandatory=$true, Position=0, ParameterSetName="ByString")]
+    [Parameter(Mandatory=$true, Position=0, ParameterSetName="ByFile")]
     [string]$InputFile,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$true, Position=1, ParameterSetName="ByString")]
+    [Parameter(Mandatory=$true, Position=1, ParameterSetName="ByFile")]
     [string]$OutputFile,
 
-    # Parametri obbligatori se MetadataFile non è presente, e viceversa
-    [Parameter(ParameterSetName="ByString", Mandatory=$true)]
+    # Parametri mutualmente esclusivi per i metadati
+    [Parameter(Mandatory=$true, ParameterSetName="ByString", HelpMessage="String containing FFmpeg metadata parameters (e.g., '-metadata title=`"My Title`"').")]
     [string]$MetadataParameters,
 
-    [Parameter(ParameterSetName="ByFile", Mandatory=$true)]
+    [Parameter(Mandatory=$true, ParameterSetName="ByFile", HelpMessage="Path to a text file containing FFmpeg metadata parameters.")]
     [string]$MetadataFile,
-	
-	# Parametro per mostrare l'aiuto, non mandatory
-    [Parameter(ParameterSetName="Help", Mandatory=$false)]
+
+    # Set di parametri per mostrare solo l'aiuto
+    [Parameter(Mandatory=$true, ParameterSetName="ShowHelp", HelpMessage="Displays this help message.")]
     [switch]$Help
 )
 
@@ -40,7 +44,7 @@ function Show-Help {
     Write-Host "This script allows you to add or modify metadata in an MP4 file using FFmpeg."
     Write-Host ""
     Write-Host "Syntax:"
-    Write-Host "    .\Add-Mp4Metadata.ps1 -InputFile <Mp4FilePath> -OutputFile <Mp4FilePath> -MetadataParameters <FFmpegParameters>"
+    Write-Host "    metadd.ps1 -InputFile <Mp4FilePath> -OutputFile <Mp4FilePath> -MetadataParameters <FFmpegParameters>"
     Write-Host ""
     Write-Host "Parameters:"
     Write-Host "    -InputFile: (Mandatory) The full path to the source MP4 file."
@@ -48,9 +52,15 @@ function Show-Help {
     Write-Host "    -MetadataParameters: (Mandatory) A string containing FFmpeg metadata parameters."
     Write-Host "                         Each metadata field must be specified with '-metadata metadata_name=`"Metadata Value`"'."
     Write-Host "                         For example: '-metadata title=`"My Song`" -metadata artist=`"My Name`"'"
-    Write-Host ""
-    Write-Host "Example:"
-    Write-Host "    .\Add-Mp4Metadata.ps1 -InputFile `"C:\Videos\original.mp4`" -OutputFile `"C:\Videos\new.mp4`" -MetadataParameters '-metadata title=`"My Song`" -metadata artist=`"Myself`" -metadata genre=`"Pop`"'"
+    Write-Host "    -MetadataFile: (Optional) The path to a text file containing FFmpeg metadata parameters."
+    Write-Host "                   Each line in the file should contain one or more metadata parameters."
+    Write-Host "                   Example file content:"
+    Write-Host "                   -------------------------------------"
+    Write-Host "                   -metadata title=`"My Video Title`" -metadata artist=`"Video Creator`""
+    Write-Host "                   -metadata genre=`"Documentary`" -metadata date=`"2023`""
+    Write-Host "                   -------------------------------------"
+    Write-Host "                   Note: You must use either -MetadataParameters OR -MetadataFile, not both."
+    Write-Host "    -Help: (Optional) Displays this help message."
     Write-Host ""
     Write-Host "List of common metadata fields supported by FFmpeg:"
     Write-Host "    - **title**: Title of the song/video."
@@ -92,10 +102,22 @@ function Test-FFmpegInstallation {
     }
 }
 
-# Show help if the script is called with -Help
-if ($Help) {
+# 1. First of all check -Help parameter
+# This is first block checked afte parameters declaration
+if ($PSCmdlet.ParameterSetName -eq "ShowHelp") {
     Show-Help
     exit
+}
+
+# 2. CHeck that mandatory parameters are peovided
+# This block is executed JUST IF -Help parameter IS NOT provided
+if (-not $PSBoundParameters.ContainsKey("InputFile") -or
+    -not $PSBoundParameters.ContainsKey("OutputFile") -or
+    (-not $PSBoundParameters.ContainsKey("MetadataParameters") -and -not $PSBoundParameters.ContainsKey("MetadataFile"))) {
+    
+    Write-Error "Missing mandatory parameters for the operation. Please provide -InputFile, -OutputFile, and either -MetadataParameters or -MetadataFile."
+    Show-Help # Mostra l'aiuto se i parametri essenziali non sono forniti
+    exit 1
 }
 
 # Verify that input and output files have .mp4 extension
